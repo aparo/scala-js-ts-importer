@@ -11,11 +11,19 @@ import scala.util.parsing.combinator.lexical._
 import scala.util.parsing.combinator.token._
 import collection.mutable.HashSet
 
+
+
 class TSDefLexical extends Lexical with StdTokens with ImplicitConversions {
+
+  case class CommentToken(content:String) extends Token {
+    override def chars: String = s"/*\n$content\n*/"
+  }
+
   // see `token' in `Scanners'
   def token: Parser[Token] = (
       identifier
     | numericLiteral
+    | comment
     | stringLiteral
     | EofCh ^^^ EOF
     | delim
@@ -92,12 +100,21 @@ class TSDefLexical extends Lexical with StdTokens with ImplicitConversions {
     c == '$' || c.isUnicodeIdentifierPart
 
   // see `whitespace in `Scanners'
-  override def whitespace: Parser[Any] = rep(
-      whitespaceChar
-    | '/' ~ '/' ~ rep(chrExcept(EofCh, '\n'))
-    | '/' ~ '*' ~ rep(not('*' ~ '/') ~> chrExcept(EofCh)) ~ '*' ~ '/'
-    | '/' ~ '*' ~ failure("unclosed comment")
-  )
+  override def whitespace: Parser[Any] = rep(whitespaceChar)
+
+  def singleLineComment: Parser[String] = '/' ~> '/' ~> rep(chrExcept(EofCh, '\n')) ~ newLineOrEof ^^ { case x ~ _ => x.mkString }
+
+  val newLine:Parser[Char] = '\n'
+
+  val endParser:Parser[Char] = EofCh
+
+  def newLineOrEof = newLine | endParser
+
+  def comment: Parser[CommentToken] = rep(
+      singleLineComment
+      | '/' ~> '*' ~> rep(not('*' ~ '/') ~ stringOf(chrExcept(EofCh))) <~ '*' <~ '/'
+      | '/' ~> '*' ~> failure("unclosed comment")
+  ) ^^ { case res if res.size>0 => CommentToken(res.mkString) }
 
   // utils
 

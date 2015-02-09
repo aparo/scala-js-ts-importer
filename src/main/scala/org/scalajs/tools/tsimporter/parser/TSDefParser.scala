@@ -7,10 +7,6 @@ package org.scalajs.tools.tsimporter.parser
 
 import org.scalajs.tools.tsimporter.Trees._
 
-import java.io.File
-
-import scala.collection.mutable.ListBuffer
-
 import scala.util.parsing.combinator._
 import scala.util.parsing.combinator.token._
 import scala.util.parsing.combinator.syntactical._
@@ -49,14 +45,20 @@ class TSDefParser extends StdTokenParsers with ImplicitConversions {
       "...", "=>"
   )
 
-  def parseDefinitions(input: Reader[Char]) =
+  def parseDefinitions(input: Reader[Char]) = {
+//    val s = new lexical.Scanner(input)
+//    println(s.first)
+//    println(s.drop(1).first)
     phrase(ambientDeclarations)(new lexical.Scanner(input))
+  }
 
   lazy val ambientDeclarations: Parser[List[DeclTree]] =
     rep(ambientDeclaration)
 
   lazy val ambientDeclaration: Parser[DeclTree] =
-    opt("declare") ~> ambientDeclaration1
+    opt(accept("comment",{
+      case lexical.CommentToken(x) => x
+    })) ~> opt("declare") ~> ambientDeclaration1
 
   lazy val ambientDeclaration1 = (
       ambientModuleDecl | ambientVarDecl | ambientFunctionDecl
