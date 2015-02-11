@@ -46,19 +46,24 @@ class TSDefParser extends StdTokenParsers with ImplicitConversions {
   )
 
   def parseDefinitions(input: Reader[Char]) = {
-//    val s = new lexical.Scanner(input)
-//    println(s.first)
-//    println(s.drop(1).first)
+    val s = new lexical.Scanner(input)
+    for(i <- 0 to 20)
+    println(s.drop(i).first)
+
+
+    input.rest
     phrase(ambientDeclarations)(new lexical.Scanner(input))
   }
 
   lazy val ambientDeclarations: Parser[List[DeclTree]] =
     rep(ambientDeclaration)
 
+  lazy val commentMaybe = opt(accept("comment",{
+    case lexical.CommentToken(x) => x
+  }))
+
   lazy val ambientDeclaration: Parser[DeclTree] =
-    opt(accept("comment",{
-      case lexical.CommentToken(x) => x
-    })) ~> opt("declare") ~> ambientDeclaration1
+    opt("declare") ~> ambientDeclaration1
 
   lazy val ambientDeclaration1 = (
       ambientModuleDecl | ambientVarDecl | ambientFunctionDecl
@@ -209,19 +214,19 @@ class TSDefParser extends StdTokenParsers with ImplicitConversions {
     memberBlock ^^ ObjectType
 
   lazy val memberBlock: Parser[List[MemberTree]] =
-    "{" ~> rep(typeMember <~ opt(";")) <~ "}"
+    "{" ~> rep((commentMaybe ~ typeMember ^^ { case c ~ tm=> tm.withComment(c)}) <~ opt(";"))
 
   lazy val typeMember: Parser[MemberTree] =
     callMember | constructorMember | indexMember | namedMember
 
   lazy val callMember: Parser[MemberTree] =
-    functionSignature ^^ CallMember
+    functionSignature ^^ { fs => CallMember(fs) }
 
   lazy val constructorMember: Parser[MemberTree] =
-    "new" ~> functionSignature ^^ ConstructorMember
+    "new" ~> functionSignature ^^ { fs => ConstructorMember(fs) }
 
   lazy val indexMember: Parser[MemberTree] =
-    ("[" ~> identifier ~ typeAnnotation <~ "]") ~ typeAnnotation ^^ IndexMember
+    ("[" ~> identifier ~ typeAnnotation <~ "]") ~ typeAnnotation ^^ { case a ~ b ~ c => IndexMember(a,b,c) }
 
   lazy val namedMember: Parser[MemberTree] =
     maybeStaticPropName ~ optionalMarker >> {

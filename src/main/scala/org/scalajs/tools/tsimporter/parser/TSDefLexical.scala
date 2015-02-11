@@ -100,21 +100,15 @@ class TSDefLexical extends Lexical with StdTokens with ImplicitConversions {
     c == '$' || c.isUnicodeIdentifierPart
 
   // see `whitespace in `Scanners'
-  override def whitespace: Parser[Any] = rep(whitespaceChar)
+  override def whitespace: Parser[Any] = rep(
+    whitespaceChar
+    | '/' ~> '/' ~> rep(chrExcept(EofCh, '\n'))
+  )
 
-  def singleLineComment: Parser[String] = '/' ~> '/' ~> rep(chrExcept(EofCh, '\n')) ~ newLineOrEof ^^ { case x ~ _ => x.mkString }
+  def anyChar = elem("anything", l=> l != EofCh)
 
-  val newLine:Parser[Char] = '\n'
-
-  val endParser:Parser[Char] = EofCh
-
-  def newLineOrEof = newLine | endParser
-
-  def comment: Parser[CommentToken] = rep(
-      singleLineComment
-      | '/' ~> '*' ~> rep(not('*' ~ '/') ~ stringOf(chrExcept(EofCh))) <~ '*' <~ '/'
-      | '/' ~> '*' ~> failure("unclosed comment")
-  ) ^^ { case res if res.size>0 => CommentToken(res.mkString) }
+  def comment: Parser[CommentToken] =
+      '/' ~> '*' ~> rep(not('*' ~ '/') ~> anyChar) ~ '*' ~ '/' ^^ { case x ~ _ ~ _ => CommentToken(x.mkString.trim.stripMargin('*')) }
 
   // utils
 

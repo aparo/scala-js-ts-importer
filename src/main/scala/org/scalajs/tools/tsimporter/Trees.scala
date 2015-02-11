@@ -10,7 +10,7 @@ import scala.util.parsing.input.Positional
 object Trees {
   // Tree
 
-  abstract sealed class Tree extends Positional {
+  abstract sealed class Tree(comment:Option[String] = None) extends Positional {
     /*override def toString() = {
       val baos = new java.io.ByteArrayOutputStream()
       val writer = new java.io.PrintWriter(baos)
@@ -19,12 +19,15 @@ object Trees {
       writer.close()
       baos.toString()
     }*/
+
   }
 
   sealed trait DeclTree extends Tree
   sealed trait TermTree extends Tree
   sealed trait TypeTree extends Tree
-  sealed trait MemberTree extends Tree
+  sealed trait MemberTree extends Tree {
+    def withComment(comment:Option[String]): MemberTree
+  }
 
   // Identifiers and properties
 
@@ -128,15 +131,25 @@ object Trees {
 
   // Type members
 
-  case class CallMember(signature: FunSignature) extends MemberTree
+  case class CallMember(signature: FunSignature, comment:Option[String] = None) extends MemberTree {
+    override def withComment(commentMaybe: Option[String]) = copy(comment = commentMaybe)
+  }
 
-  case class ConstructorMember(signature: FunSignature) extends MemberTree
+  case class ConstructorMember(signature: FunSignature, comment:Option[String] = None) extends MemberTree {
+    override def withComment(commentMaybe: Option[String]) = copy(comment = commentMaybe)
+  }
 
-  case class IndexMember(indexName: Ident, indexType: TypeTree, valueType: TypeTree) extends MemberTree
+  case class IndexMember(indexName: Ident, indexType: TypeTree, valueType: TypeTree, comment:Option[String] = None) extends MemberTree {
+    override def withComment(commentMaybe: Option[String]) = copy(comment = commentMaybe)
+  }
 
   case class PropertyMember(name: PropertyName, optional: Boolean,
-      tpe: TypeTree, static: Boolean) extends MemberTree
+      tpe: TypeTree, static: Boolean, comment:Option[String] = None) extends MemberTree {
+    override def withComment(commentMaybe: Option[String]) = copy(comment = commentMaybe)
+  }
 
   case class FunctionMember(name: PropertyName, optional: Boolean,
-      signature: FunSignature, static: Boolean) extends MemberTree
+      signature: FunSignature, static: Boolean, comment:Option[String] = None) extends MemberTree {
+    override def withComment(commentMaybe: Option[String]) = copy(comment = commentMaybe)
+  }
 }
