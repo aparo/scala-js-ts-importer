@@ -7,10 +7,6 @@ package org.scalajs.tools.tsimporter.parser
 
 import org.scalajs.tools.tsimporter.Trees._
 
-import java.io.File
-
-import scala.collection.mutable.ListBuffer
-
 import scala.util.parsing.combinator._
 import scala.util.parsing.combinator.token._
 import scala.util.parsing.combinator.syntactical._
@@ -49,11 +45,22 @@ class TSDefParser extends StdTokenParsers with ImplicitConversions {
       "...", "=>"
   )
 
-  def parseDefinitions(input: Reader[Char]) =
+  def parseDefinitions(input: Reader[Char]) = {
+    val s = new lexical.Scanner(input)
+    for(i <- 0 to 20)
+    println(s.drop(i).first)
+
+
+    input.rest
     phrase(ambientDeclarations)(new lexical.Scanner(input))
+  }
 
   lazy val ambientDeclarations: Parser[List[DeclTree]] =
     rep(ambientDeclaration)
+
+  lazy val commentMaybe = opt(accept("comment",{
+    case lexical.CommentToken(x) => x
+  }))
 
   lazy val ambientDeclaration: Parser[DeclTree] =
     opt("declare") ~> ambientDeclaration1
@@ -207,19 +214,19 @@ class TSDefParser extends StdTokenParsers with ImplicitConversions {
     memberBlock ^^ ObjectType
 
   lazy val memberBlock: Parser[List[MemberTree]] =
-    "{" ~> rep(typeMember <~ opt(";")) <~ "}"
+    "{" ~> rep((commentMaybe ~ typeMember ^^ { case c ~ tm=> tm.withComment(c)}) <~ opt(";"))
 
   lazy val typeMember: Parser[MemberTree] =
     callMember | constructorMember | indexMember | namedMember
 
   lazy val callMember: Parser[MemberTree] =
-    functionSignature ^^ CallMember
+    functionSignature ^^ { fs => CallMember(fs) }
 
   lazy val constructorMember: Parser[MemberTree] =
-    "new" ~> functionSignature ^^ ConstructorMember
+    "new" ~> functionSignature ^^ { fs => ConstructorMember(fs) }
 
   lazy val indexMember: Parser[MemberTree] =
-    ("[" ~> identifier ~ typeAnnotation <~ "]") ~ typeAnnotation ^^ IndexMember
+    ("[" ~> identifier ~ typeAnnotation <~ "]") ~ typeAnnotation ^^ { case a ~ b ~ c => IndexMember(a,b,c) }
 
   lazy val namedMember: Parser[MemberTree] =
     maybeStaticPropName ~ optionalMarker >> {

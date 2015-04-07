@@ -11,11 +11,19 @@ import scala.util.parsing.combinator.lexical._
 import scala.util.parsing.combinator.token._
 import collection.mutable.HashSet
 
+
+
 class TSDefLexical extends Lexical with StdTokens with ImplicitConversions {
+
+  case class CommentToken(content:String) extends Token {
+    override def chars: String = s"/*\n$content\n*/"
+  }
+
   // see `token' in `Scanners'
   def token: Parser[Token] = (
       identifier
     | numericLiteral
+    | comment
     | stringLiteral
     | EofCh ^^^ EOF
     | delim
@@ -93,11 +101,14 @@ class TSDefLexical extends Lexical with StdTokens with ImplicitConversions {
 
   // see `whitespace in `Scanners'
   override def whitespace: Parser[Any] = rep(
-      whitespaceChar
-    | '/' ~ '/' ~ rep(chrExcept(EofCh, '\n'))
-    | '/' ~ '*' ~ rep(not('*' ~ '/') ~> chrExcept(EofCh)) ~ '*' ~ '/'
-    | '/' ~ '*' ~ failure("unclosed comment")
+    whitespaceChar
+    | '/' ~> '/' ~> rep(chrExcept(EofCh, '\n'))
   )
+
+  def anyChar = elem("anything", l=> l != EofCh)
+
+  def comment: Parser[CommentToken] =
+      '/' ~> '*' ~> rep(not('*' ~ '/') ~> anyChar) ~ '*' ~ '/' ^^ { case x ~ _ ~ _ => CommentToken(x.mkString.trim.stripMargin('*')) }
 
   // utils
 

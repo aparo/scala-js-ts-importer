@@ -74,7 +74,7 @@ class Importer(val output: java.io.PrintWriter) {
         processMembersDecls(owner, sym, members)
         if (!sym.members.exists(_.name == Name.CONSTRUCTOR)) {
           processDefDecl(sym, Name.CONSTRUCTOR,
-              FunSignature(Nil, Nil, Some(TypeRefTree(CoreType("void")))))
+              FunSignature(Nil, Nil, Some(TypeRefTree(CoreType("void")))), commentMaybe = None) //FIXME: commentMaybe
         }
 
       case InterfaceDecl(TypeNameName(name), tparams, inheritance, members) =>
@@ -93,7 +93,7 @@ class Importer(val output: java.io.PrintWriter) {
         sym.tpe = typeToScala(tpe)
 
       case FunctionDecl(IdentName(name), signature) =>
-        processDefDecl(owner, name, signature)
+        processDefDecl(owner, name, signature, commentMaybe = None ) // FIXME: commentMaybe
 
       case _ =>
         owner.members += new CommentSymbol("??? "+declaration)
@@ -115,41 +115,41 @@ class Importer(val output: java.io.PrintWriter) {
     }
 
     for (member <- members) member match {
-      case CallMember(signature) =>
-        processDefDecl(owner, Name("apply"), signature, protectName = false)
+      case CallMember(signature, comment) =>
+        processDefDecl(owner, Name("apply"), signature, protectName = false, commentMaybe = comment)
 
-      case ConstructorMember(sig @ FunSignature(tparamsIgnored, params, Some(resultType)))
+      case ConstructorMember(sig @ FunSignature(tparamsIgnored, params, Some(resultType)), comment)
       if owner.isInstanceOf[ModuleSymbol] && resultType == companionClassRef =>
         val classSym = enclosing.getClassOrCreate(owner.name)
         classSym.isTrait = false
         processDefDecl(classSym, Name.CONSTRUCTOR,
-            FunSignature(Nil, params, Some(TypeRefTree(CoreType("void")))))
+            FunSignature(Nil, params, Some(TypeRefTree(CoreType("void")))), commentMaybe = comment)
 
-      case PropertyMember(PropertyNameName(name), opt, tpe, true) =>
+      case PropertyMember(PropertyNameName(name), opt, tpe, true, comment) =>
         assert(owner.isInstanceOf[ClassSymbol],
             s"Cannot process static member $name in module definition")
         val module = enclosing.getModuleOrCreate(owner.name)
-        processPropertyDecl(module, name, tpe)
+        processPropertyDecl(module, name, tpe, commentMaybe = comment)
 
-      case PropertyMember(PropertyNameName(name), opt, tpe, _) =>
-        processPropertyDecl(owner, name, tpe)
+      case PropertyMember(PropertyNameName(name), opt, tpe, _, comment) =>
+        processPropertyDecl(owner, name, tpe, commentMaybe = comment)
 
-      case FunctionMember(PropertyName("constructor"), _, signature, false)
+      case FunctionMember(PropertyName("constructor"), _, signature, false, comment)
       if owner.isInstanceOf[ClassSymbol] =>
         owner.asInstanceOf[ClassSymbol].isTrait = false
         processDefDecl(owner, Name.CONSTRUCTOR,
-            FunSignature(Nil, signature.params, Some(TypeRefTree(CoreType("void")))))
+            FunSignature(Nil, signature.params, Some(TypeRefTree(CoreType("void")))), commentMaybe = comment)
 
-      case FunctionMember(PropertyNameName(name), opt, signature, true) =>
+      case FunctionMember(PropertyNameName(name), opt, signature, true, comment) =>
         assert(owner.isInstanceOf[ClassSymbol],
             s"Cannot process static member $name in module definition")
         val module = enclosing.getModuleOrCreate(owner.name)
-        processDefDecl(module, name, signature)
+        processDefDecl(module, name, signature, commentMaybe = comment)
 
-      case FunctionMember(PropertyNameName(name), opt, signature, _) =>
-        processDefDecl(owner, name, signature)
+      case FunctionMember(PropertyNameName(name), opt, signature, _, comment) =>
+        processDefDecl(owner, name, signature, commentMaybe = comment)
 
-      case IndexMember(IdentName(indexName), indexType, valueType) =>
+      case IndexMember(IdentName(indexName), indexType, valueType, comment) =>
         val indexTpe = typeToScala(indexType)
         val valueTpe = typeToScala(valueType)
 
@@ -170,13 +170,13 @@ class Importer(val output: java.io.PrintWriter) {
   }
 
   private def processPropertyDecl(owner: ContainerSymbol, name: Name,
-      tpe: TypeTree, protectName: Boolean = true) {
+      tpe: TypeTree, protectName: Boolean = true, commentMaybe: Option[String]) {
     if (name.name != "prototype") {
       tpe match {
         case ObjectType(members) if members.forall(_.isInstanceOf[CallMember]) =>
           // alternative notation for overload methods - #3
-          for (CallMember(signature) <- members)
-            processDefDecl(owner, name, signature, protectName)
+          for (CallMember(signature, comment) <- members)
+            processDefDecl(owner, name, signature, protectName, commentMaybe = comment)
         case _ =>
           val sym = owner.newField(name)
           if (protectName)
@@ -187,7 +187,10 @@ class Importer(val output: java.io.PrintWriter) {
   }
 
   private def processDefDecl(owner: ContainerSymbol, name: Name,
-      signature: FunSignature, protectName: Boolean = true) {
+      signature: FunSignature, protectName: Boolean = true, commentMaybe: Option[String]) {
+
+    println(commentMaybe)
+
     // Discard specialized signatures
     if (signature.params.exists(_.tpe.exists(_.isInstanceOf[ConstantType])))
       return
