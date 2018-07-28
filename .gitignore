@@ -1,5 +1,9 @@
 target/
+/bin/
 .cache
+.cache-main
 .classpath
 .project
 .settings/
+/node_modules
+/package-lock.json

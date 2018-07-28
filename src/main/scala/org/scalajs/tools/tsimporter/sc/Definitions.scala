@@ -7,12 +7,14 @@ package org.scalajs.tools.tsimporter.sc
 
 import scala.language.implicitConversions
 
-import scala.collection.mutable._
+import scala.collection.mutable.ListBuffer
 
 import org.scalajs.tools.tsimporter.Utils
+import org.scalajs.tools.tsimporter.Trees.{ Modifier, Modifiers }
 
 case class Name(name: String) {
   override def toString() = Utils.scalaEscape(name)
+  def capitalize = Name(name.capitalize)
 }
 
 object Name {
@@ -25,6 +27,9 @@ object Name {
   val EMPTY = Name("")
   val CONSTRUCTOR = Name("<init>")
   val REPEATED = Name("*")
+  val SINGLETON = Name("<typeof>")
+  val THIS = Name("<this>")
+  val INTERSECTION = Name("<with>")
 }
 
 case class QualifiedName(parts: Name*) {
@@ -48,8 +53,13 @@ object QualifiedName {
   val java_lang = Root dot Name.java dot Name.lang
 
   val Array = scala_js dot Name("Array")
+  val Dictionary = scala_js dot Name("Dictionary")
   val FunctionBase = scala_js dot Name("Function")
+  val Object = scala_js dot Name("Object")
   def Function(arity: Int) = scala_js dot Name("Function"+arity)
+  def Tuple(arity: Int) = scala_js dot Name("Tuple"+arity)
+  val Union = scala_js dot Name("|")
+  val Intersection = QualifiedName(Name.INTERSECTION)
 }
 
 class Symbol(val name: Name) {
@@ -120,14 +130,20 @@ class ContainerSymbol(nme: Name) extends Symbol(nme) {
     }
   }
 
-  def newField(name: Name): FieldSymbol = {
-    val result = new FieldSymbol(name)
+  def newTypeAlias(name: Name): TypeAliasSymbol = {
+    val result = new TypeAliasSymbol(name)
     members += result
     result
   }
 
-  def newMethod(name: Name): MethodSymbol = {
-    val result = new MethodSymbol(name)
+  def newField(name: Name, modifiers: Modifiers): FieldSymbol = {
+    val result = new FieldSymbol(name, modifiers)
+    members += result
+    result
+  }
+
+  def newMethod(name: Name, modifiers: Modifiers): MethodSymbol = {
+    val result = new MethodSymbol(name, modifiers)
     members += result
     result
   }
@@ -163,26 +179,38 @@ class ClassSymbol(nme: Name) extends ContainerSymbol(nme) {
   var companionModule: ModuleSymbol = _
   var isTrait: Boolean = true
   var isSealed: Boolean = false
+  var isAbstract: Boolean = false
 
   override def toString() = (
       (if (isSealed) "sealed " else "") +
+      (if (isAbstract) "abstract" else "") +
       (if (isTrait) s"trait $name" else s"class $name") +
       (if (tparams.isEmpty) "" else tparams.mkString("<", ", ", ">")))
 }
 
 class ModuleSymbol(nme: Name) extends ContainerSymbol(nme) {
   var companionClass: ClassSymbol = _
+  var isGlobal: Boolean = true
 
   override def toString() = s"object $name"
 }
 
-class FieldSymbol(nme: Name) extends Symbol(nme) with JSNameable {
-  var tpe: TypeRef = TypeRef.Any
+class TypeAliasSymbol(nme: Name) extends Symbol(nme) {
+  val tparams = new ListBuffer[TypeParamSymbol]
+  var alias: TypeRef = TypeRef.Any
 
-  override def toString() = s"${jsNameStr}var $name: $tpe"
+  override def toString() = (
+      (s"type $name") +
+      (if (tparams.isEmpty) "" else tparams.mkString("<", ", ", ">")))
 }
 
-class MethodSymbol(nme: Name) extends Symbol(nme) with JSNameable {
+class FieldSymbol(nme: Name, val modifiers: Modifiers) extends Symbol(nme) with JSNameable {
+  var tpe: TypeRef = TypeRef.Any
+
+  override def toString() = s"${jsNameStr}${if (modifiers(Modifier.ReadOnly)) "val" else "var"} $name: $tpe"
+}
+
+class MethodSymbol(nme: Name, val modifiers: Modifiers) extends Symbol(nme) with JSNameable {
   val tparams = new ListBuffer[TypeParamSymbol]
   val params = new ListBuffer[ParamSymbol]
   var resultType: TypeRef = TypeRef.Dynamic
@@ -198,11 +226,22 @@ class MethodSymbol(nme: Name) extends Symbol(nme) with JSNameable {
     s"${jsNameStr}${bracketAccessStr}def $name$tparamsStr(${params.mkString(", ")}): $resultType"
   }
 
+  def paramTypes = params.map(_.tpe)
+
+  def needsOverride: Boolean = {
+    def noParams = tparams.isEmpty && params.isEmpty
+    name match {
+      case Name("toString") => noParams // Any return type will trigger the error
+      case Name("clone")    => noParams // Any return type will trigger the error
+      case _                => false
+    }
+  }
+
   override def equals(that: Any): Boolean = that match {
     case that: MethodSymbol =>
       (this.name == that.name &&
           this.tparams == that.tparams &&
-          this.params == that.params &&
+          this.paramTypes == that.paramTypes &&
           this.resultType == that.resultType)
     case _ =>
       false
@@ -237,15 +276,20 @@ class ParamSymbol(nme: Name) extends Symbol(nme) {
 
   override def equals(that: Any): Boolean = that match {
     case that: ParamSymbol =>
-      this.name == that.name
+      (this.name == that.name &&
+          this.tpe == that.tpe)
     case _ =>
       false
   }
 }
 
 case class TypeRef(typeName: QualifiedName, targs: List[TypeRef] = Nil) {
-  override def toString() =
-    s"$typeName[${targs.mkString(", ")}]"
+  override def toString() = {
+    if (targs.isEmpty)
+      typeName.toString
+    else
+      s"$typeName[${targs.mkString(", ")}]"
+  }
 }
 
 object TypeRef {
@@ -256,11 +300,51 @@ object TypeRef {
   val Any = TypeRef(scala_js dot Name("Any"))
   val Dynamic = TypeRef(scala_js dot Name("Dynamic"))
   val Double = TypeRef(scala dot Name("Double"))
+  val Int = TypeRef(scala dot Name("Int"))
   val Boolean = TypeRef(scala dot Name("Boolean"))
   val String = TypeRef(java_lang dot Name("String"))
   val Object = TypeRef(scala_js dot Name("Object"))
   val Function = TypeRef(scala_js dot Name("Function"))
   val Unit = TypeRef(scala dot Name("Unit"))
+  val Null = TypeRef(scala dot Name("Null"))
+  val Nothing = TypeRef(scala dot Name("Nothing"))
+  val This = Singleton(QualifiedName(Name.THIS))
+
+  object Union {
+    def apply(types: List[TypeRef]): TypeRef =
+      TypeRef(QualifiedName.Union, types)
+
+    def unapply(typeRef: TypeRef): Option[List[TypeRef]] = typeRef match {
+      case TypeRef(QualifiedName.Union, types) =>
+        Some(types)
+
+      case _ => None
+    }
+  }
+
+  object Intersection {
+    def apply(types: List[TypeRef]): TypeRef =
+      TypeRef(QualifiedName.Intersection, types)
+
+    def unapply(typeRef: TypeRef): Option[List[TypeRef]] = typeRef match {
+      case TypeRef(QualifiedName.Intersection, types) =>
+        Some(types)
+
+      case _ => None
+    }
+  }
+
+  object Singleton {
+    def apply(underlying: QualifiedName): TypeRef =
+      TypeRef(QualifiedName(Name.SINGLETON), List(TypeRef(underlying)))
+
+    def unapply(typeRef: TypeRef): Option[QualifiedName] = typeRef match {
+      case TypeRef(QualifiedName(Name.SINGLETON), List(TypeRef(underlying, Nil))) =>
+        Some(underlying)
+
+      case _ => None
+    }
+  }
 
   object Repeated {
     def apply(underlying: TypeRef): TypeRef =

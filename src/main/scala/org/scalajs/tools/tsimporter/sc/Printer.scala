@@ -6,6 +6,7 @@
 package org.scalajs.tools.tsimporter.sc
 
 import java.io.PrintWriter
+import org.scalajs.tools.tsimporter.Trees.Modifier
 
 class Printer(private val output: PrintWriter, outputPackage: String) {
   import Printer._
@@ -23,11 +24,8 @@ class Printer(private val output: PrintWriter, outputPackage: String) {
       case sym: PackageSymbol =>
         val isRootPackage = name == Name.EMPTY
 
-        val (topLevels, packageObjectMembers) =
-          sym.members.partition(canBeTopLevel)
-
         val parentPackage :+ thisPackage =
-          if (isRootPackage) outputPackage.split("\\.").toList
+          if (isRootPackage) outputPackage.split("\\.").toList.map(Name(_))
           else List(name)
 
         if (!parentPackage.isEmpty) {
@@ -38,32 +36,44 @@ class Printer(private val output: PrintWriter, outputPackage: String) {
           pln"";
           pln"import scala.scalajs.js"
           pln"import js.annotation._"
+          pln"import js.|"
         }
 
         val oldJSNamespace = currentJSNamespace
         if (!isRootPackage)
           currentJSNamespace += name.name + "."
 
-        if (!topLevels.isEmpty) {
+        if (!sym.members.isEmpty) {
+          val (topLevels, packageObjectMembers) =
+            sym.members.partition(canBeTopLevel)
+
           pln"";
           pln"package $thisPackage {"
+
           for (sym <- topLevels)
             printSymbol(sym)
-          pln"";
-          pln"}"
-        }
 
-        if (!packageObjectMembers.isEmpty) {
-          pln"";
-          if (currentJSNamespace == "") {
-            pln"package object $thisPackage extends js.GlobalScope {"
-          } else {
-            val jsName = currentJSNamespace.init
-            pln"""@JSName("$jsName")"""
-            pln"package object $thisPackage extends js.Object {"
+          if (!packageObjectMembers.isEmpty) {
+            val packageObjectName =
+              Name(thisPackage.name.head.toUpper + thisPackage.name.tail)
+
+            pln"";
+            if (currentJSNamespace.isEmpty) {
+              pln"@js.native"
+              pln"@JSGlobalScope"
+              pln"object $packageObjectName extends js.Object {"
+            } else {
+              val jsName = currentJSNamespace.init
+              pln"@js.native"
+              pln"""@JSGlobal("$jsName")"""
+              pln"object $packageObjectName extends js.Object {"
+            }
+            for (sym <- packageObjectMembers)
+              printSymbol(sym)
+            pln"}"
           }
-          for (sym <- packageObjectMembers)
-            printSymbol(sym)
+
+          pln"";
           pln"}"
         }
 
@@ -71,6 +81,7 @@ class Printer(private val output: PrintWriter, outputPackage: String) {
 
       case sym: ClassSymbol =>
         val sealedKw = if (sym.isSealed) "sealed " else ""
+        val abstractKw = if (sym.isAbstract) "abstract " else ""
         val kw = if (sym.isTrait) "trait" else "class"
         val constructorStr =
           if (sym.isTrait) ""
@@ -81,9 +92,14 @@ class Printer(private val output: PrintWriter, outputPackage: String) {
           else sym.parents.toList
 
         pln"";
-        if (currentJSNamespace != "" && !sym.isTrait)
-          pln"""@JSName("$currentJSNamespace$name")"""
-        p"$sealedKw$kw $name"
+        pln"@js.native"
+        if (!sym.isTrait) {
+          if (currentJSNamespace.isEmpty)
+            pln"@JSGlobal"
+          else
+            pln"""@JSGlobal("$currentJSNamespace${name.name}")"""
+        }
+        p"$sealedKw$abstractKw$kw $name"
         if (!sym.tparams.isEmpty)
           p"[${sym.tparams}]"
 
@@ -97,17 +113,40 @@ class Printer(private val output: PrintWriter, outputPackage: String) {
 
       case sym: ModuleSymbol =>
         pln"";
-        if (currentJSNamespace != "")
-          pln"""@JSName("$currentJSNamespace$name")"""
-        pln"object $name extends js.Object {"
+        if (sym.isGlobal) {
+          pln"@js.native"
+          if (currentJSNamespace.isEmpty)
+            pln"@JSGlobal"
+          else
+            pln"""@JSGlobal("$currentJSNamespace${name.name}")"""
+          pln"object $name extends js.Object {"
+        } else {
+          pln"object $name {"
+        }
         printMemberDecls(sym)
         pln"}"
+
+      case sym: TypeAliasSymbol =>
+        p"  type $name"
+        if (!sym.tparams.isEmpty)
+          p"[${sym.tparams}]"
+        pln" = ${sym.alias}"
 
       case sym: FieldSymbol =>
         sym.jsName foreach { jsName =>
           pln"""  @JSName("$jsName")"""
         }
-        pln"  var $name: ${sym.tpe} = js.native"
+        val access =
+          if (sym.modifiers(Modifier.Protected)) "protected "
+          else ""
+        val decl =
+          if (sym.modifiers(Modifier.Const)) "val"
+          else if (sym.modifiers(Modifier.ReadOnly)) "def"
+          else "var"
+        p"  $access$decl $name: ${sym.tpe}"
+        if (!sym.modifiers(Modifier.Abstract))
+          p" = js.native"
+        pln""
 
       case sym: MethodSymbol =>
         val params = sym.params
@@ -121,10 +160,15 @@ class Printer(private val output: PrintWriter, outputPackage: String) {
           }
           if (sym.isBracketAccess)
             pln"""  @JSBracketAccess"""
-          p"  def $name"
+          val modifiers =
+            if (sym.needsOverride) "override " else ""
+          p"  ${modifiers}def $name"
           if (!sym.tparams.isEmpty)
             p"[${sym.tparams}]"
-          pln"($params): ${sym.resultType} = js.native"
+          p"($params): ${sym.resultType}"
+          if (!sym.modifiers(Modifier.Abstract))
+            p" = js.native"
+          pln""
         }
 
       case sym: ParamSymbol =>
@@ -160,6 +204,20 @@ class Printer(private val output: PrintWriter, outputPackage: String) {
       case TypeRef(typeName, Nil) =>
         p"$typeName"
 
+      case TypeRef.Union(types) =>
+        implicit val withPipe = ListElemSeparator.Pipe
+        p"$types"
+
+      case TypeRef.Intersection(types) =>
+        implicit val withWith = ListElemSeparator.WithKeyword
+        p"$types"
+
+      case TypeRef.This =>
+        p"this.type"
+
+      case TypeRef.Singleton(termRef) =>
+        p"$termRef.type"
+
       case TypeRef.Repeated(underlying) =>
         p"$underlying*"
 
@@ -187,6 +245,7 @@ object Printer {
 
   private object ListElemSeparator {
     val Comma = new ListElemSeparator(", ")
+    val Pipe = new ListElemSeparator(" | ")
     val WithKeyword = new ListElemSeparator(" with ")
   }
 

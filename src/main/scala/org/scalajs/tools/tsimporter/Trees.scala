@@ -10,7 +10,7 @@ import scala.util.parsing.input.Positional
 object Trees {
   // Tree
 
-  abstract sealed class Tree(comment:Option[String] = None) extends Positional {
+  abstract sealed class Tree extends Positional {
     /*override def toString() = {
       val baos = new java.io.ByteArrayOutputStream()
       val writer = new java.io.PrintWriter(baos)
@@ -19,15 +19,27 @@ object Trees {
       writer.close()
       baos.toString()
     }*/
-
   }
 
   sealed trait DeclTree extends Tree
   sealed trait TermTree extends Tree
   sealed trait TypeTree extends Tree
-  sealed trait MemberTree extends Tree {
-    def withComment(comment:Option[String]): MemberTree
+  sealed trait MemberTree extends Tree
+
+  // Modifiers
+
+  abstract sealed class Modifier
+
+  object Modifier {
+    case object Public extends Modifier
+    case object Protected extends Modifier
+    case object Static extends Modifier
+    case object ReadOnly extends Modifier
+    case object Const extends Modifier
+    case object Abstract extends Modifier
   }
+
+  type Modifiers = Set[Modifier]
 
   // Identifiers and properties
 
@@ -61,13 +73,23 @@ object Trees {
     }
   }
 
+  case class QualifiedIdent(qualifier: List[Ident], name: Ident) extends Tree
+
   // Declarations
 
   case class ModuleDecl(name: PropertyName, members: List[DeclTree]) extends DeclTree
 
   case class VarDecl(name: Ident, tpe: Option[TypeTree]) extends DeclTree
 
+  case class ConstDecl(name: Ident, tpe: Option[TypeTree]) extends DeclTree
+
+  case class LetDecl(name: Ident, tpe: Option[TypeTree]) extends DeclTree
+
   case class FunctionDecl(name: Ident, signature: FunSignature) extends DeclTree
+
+  case object ImportDecl extends DeclTree
+
+  case class TopLevelExportDecl(name: Ident) extends DeclTree
 
   // Function signature
 
@@ -78,7 +100,7 @@ object Trees {
 
   // Type parameters
 
-  case class TypeParam(name: TypeName, upperBound: Option[TypeRef]) extends Tree
+  case class TypeParam(name: TypeName, upperBound: Option[TypeTree]) extends Tree
 
   // Literals
 
@@ -90,7 +112,15 @@ object Trees {
 
   case class BooleanLiteral(value: Boolean) extends Literal
 
-  case class NumberLiteral(value: Double) extends Literal
+  sealed trait NumberLiteral extends Literal with PropertyName
+
+  case class IntLiteral(value: Int) extends NumberLiteral {
+    override def name = value.toString
+  }
+
+  case class DoubleLiteral(value: Double) extends NumberLiteral {
+    override def name = value.toString
+  }
 
   case class StringLiteral(value: String) extends Literal with PropertyName {
     override def name = value
@@ -104,10 +134,13 @@ object Trees {
 
   case class ClassDecl(name: TypeName, tparams: List[TypeParam],
       parent: Option[TypeRef], implements: List[TypeRef],
-      membmers: List[MemberTree]) extends DeclTree
+      members: List[MemberTree], isAbstract: Boolean) extends DeclTree
 
   case class InterfaceDecl(name: TypeName, tparams: List[TypeParam],
       inheritance: List[TypeRef], members: List[MemberTree]) extends DeclTree
+
+  case class TypeAliasDecl(name: TypeName, tparams: List[TypeParam],
+      alias: TypeTree) extends DeclTree
 
   case class TypeRef(name: BaseTypeRef, tparams: List[TypeTree] = Nil) extends TypeTree
 
@@ -127,29 +160,34 @@ object Trees {
 
   case class FunctionType(signature: FunSignature) extends TypeTree
 
+  case class UnionType(left: TypeTree, right: TypeTree) extends TypeTree
+
+  case class IntersectionType(left: TypeTree, right: TypeTree) extends TypeTree
+
+  case class TupleType(tparams: List[TypeTree]) extends TypeTree
+
+  case class TypeQuery(expr: QualifiedIdent) extends TypeTree
+
   case class RepeatedType(underlying: TypeTree) extends TypeTree
+
+  case class IndexedQueryType(underlying: TypeTree) extends TypeTree
+  case class IndexedAccessType(objectType: TypeTree, name: TypeTree) extends TypeTree
+
+  object PolymorphicThisType extends TypeTree
 
   // Type members
 
-  case class CallMember(signature: FunSignature, comment:Option[String] = None) extends MemberTree {
-    override def withComment(commentMaybe: Option[String]) = copy(comment = commentMaybe)
-  }
+  case class CallMember(signature: FunSignature) extends MemberTree
 
-  case class ConstructorMember(signature: FunSignature, comment:Option[String] = None) extends MemberTree {
-    override def withComment(commentMaybe: Option[String]) = copy(comment = commentMaybe)
-  }
+  case class ConstructorMember(signature: FunSignature) extends MemberTree
 
-  case class IndexMember(indexName: Ident, indexType: TypeTree, valueType: TypeTree, comment:Option[String] = None) extends MemberTree {
-    override def withComment(commentMaybe: Option[String]) = copy(comment = commentMaybe)
-  }
+  case class IndexMember(indexName: Ident, indexType: TypeTree, valueType: TypeTree, modifiers: Modifiers) extends MemberTree
 
   case class PropertyMember(name: PropertyName, optional: Boolean,
-      tpe: TypeTree, static: Boolean, comment:Option[String] = None) extends MemberTree {
-    override def withComment(commentMaybe: Option[String]) = copy(comment = commentMaybe)
-  }
+      tpe: TypeTree, modifiers: Modifiers) extends MemberTree
 
   case class FunctionMember(name: PropertyName, optional: Boolean,
-      signature: FunSignature, static: Boolean, comment:Option[String] = None) extends MemberTree {
-    override def withComment(commentMaybe: Option[String]) = copy(comment = commentMaybe)
-  }
+      signature: FunSignature, modifiers: Modifiers) extends MemberTree
+
+  case object PrivateMember extends MemberTree
 }
