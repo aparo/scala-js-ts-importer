@@ -1,24 +1,26 @@
 package org.scalajs.tools.tsimporter
 
-import java.io.File
-
-
-case class Config(tsFiles: Seq[File] = Seq(), outputDirectory: String = "", outputPackage: String = "importedjs")
+case class Config(
+    inputFileName: String = "",
+    outputFileName: String = "",
+    packageName: String = "importedjs"
+)
 
 object Config {
-  val parser = new scopt.OptionParser[Config]("scopt") {
-    head("scalajs-ts-importer")
-    opt[String]("package") action {
-      (x, c) => c.copy(outputPackage = x)
-    } text "Package name for the output (defaults to 'importedjs')"
-    opt[String]("output") action {
-      (x, c) => c.copy(outputDirectory = x)
-    } text "Output directory for wrote files)"
-    arg[File]("<file>...") unbounded() optional() action { (x, c) =>
-      c.copy(tsFiles = c.tsFiles :+ x)
-    } text ("TypeScript type definition file to read")
+  final val parser = new scopt.OptionParser[Config]("scalajs-ts-importer") {
+    arg[String]("<input.d.ts>").required()
+      .text("TypeScript type definition file to be read")
+      .action((i, config) => config.copy(inputFileName = i))
+
+    arg[String]("<output.scala>").required()
+      .text("Output Scala.js file")
+      .action((o, config) => config.copy(outputFileName = o))
+
+    arg[String]("<package>").optional()
+      .text("Package name for the output (defaults to \"importedjs\")")
+      .action((pn, config) => config.copy(packageName = pn))
+
+    help("help").abbr("h")
+      .text("prints help")
   }
-
-  def parse(args: Array[String]): Option[Config] = parser.parse(args, Config())
-
 }

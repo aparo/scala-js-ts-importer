@@ -7,8 +7,6 @@ package org.scalajs.tools.tsimporter
 
 import java.io.{ Console => _, Reader => _, _ }
 
-import scala.collection.immutable.PagedSeq
-
 import Trees._
 
 import scala.util.parsing.input._
@@ -17,39 +15,34 @@ import parser.TSDefParser
 /** Entry point for the TypeScript importer of Scala.js */
 object Main {
   def main(args: Array[String]) {
-    if (args.length < 2) {
-      Console.err.println("""
-        |Usage: scalajs-ts-importer <input.d.ts> <output.scala> [<package>]
-        |  <input.d.ts>     TypeScript type definition file to read
-        |  <output.scala>   Output Scala.js file
-        |  <package>        Package name for the output (defaults to "importedjs")
-      """.stripMargin.trim)
-      System.exit(1)
-    }
+    for (config <- Config.parser.parse(args, Config())) {
+      val outputPackage = config.packageName
 
-    val inputFileName = args(0)
-    val outputFileName = args(1)
-    val outputPackage = if (args.length > 2) args(2) else "importedjs"
-
-    importTsFile(inputFileName, outputFileName, outputPackage) match {
-      case Right(()) =>
-        ()
-      case Left(message) =>
-        Console.err.println(message)
-        System.exit(2)
+      importTsFile(config.inputFileName, config.outputFileName, outputPackage) match {
+        case Right(()) =>
+          ()
+        case Left(message) =>
+          Console.err.println(message)
+          System.exit(2)
+      }
     }
-}
+  }
 
   def importTsFile(inputFileName: String, outputFileName: String, outputPackage: String): Either[String, Unit] = {
-    parseDefinitions(readerForFile(inputFileName)).map { definitions =>
-      val output = new PrintWriter(new BufferedWriter(
-          new FileWriter(outputFileName)))
-      try {
-        process(definitions, output, outputPackage)
-        Right(())
-      } finally {
-        output.close()
+    val javaReader = new BufferedReader(new FileReader(inputFileName))
+    try {
+      val reader = new PagedSeqReader(PagedSeq.fromReader(javaReader))
+      parseDefinitions(reader).map { definitions =>
+        val output = new PrintWriter(new BufferedWriter(new FileWriter(outputFileName)))
+        try {
+          process(definitions, output, outputPackage)
+          Right(())
+        } finally {
+          output.close()
+        }
       }
+    } finally {
+      javaReader.close()
     }
   }
 
@@ -70,14 +63,5 @@ object Main {
             msg + "\n" +
             next.pos.longString)
     }
-  }
-
-  /** Builds a [[scala.util.parsing.input.PagedSeqReader]] for a file
-   *
-   *  @param fileName name of the file to be read
-   */
-  private def readerForFile(fileName: String) = {
-    new PagedSeqReader(PagedSeq.fromReader(
-        new BufferedReader(new FileReader(fileName))))
   }
 }
