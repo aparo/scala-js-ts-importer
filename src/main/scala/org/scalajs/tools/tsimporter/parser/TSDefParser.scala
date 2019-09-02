@@ -102,7 +102,7 @@ class TSDefParser extends StdTokenParsers with ImplicitConversions {
     "function" ~> identifier ~ functionSignature <~ opt(";") ^^ FunctionDecl
 
   lazy val ambientEnumDecl: Parser[DeclTree] =
-    "enum" ~> typeName ~ ("{" ~> ambientEnumBody <~ "}") ^^ EnumDecl
+    opt("const") ~> "enum" ~> typeName ~ ("{" ~> ambientEnumBody <~ "}") ^^ EnumDecl
 
   lazy val ambientEnumBody: Parser[List[Ident]] =
     repsep(identifier <~ opt("=" ~ (numericLit | stringLit) ), ",") <~ opt(",")
@@ -120,15 +120,16 @@ class TSDefParser extends StdTokenParsers with ImplicitConversions {
 
   lazy val importDecl: Parser[DeclTree] =
     "import" ~> opt(
-      (
+      repsep(
           identifier
-        |  "{" ~ importIdentifierSeq ~ "}"
+        | "{" ~ importIdentifierSeq ~ "}"
         | "*" ~ lexical.Identifier("as") ~ identifier
+        , ","
       ) ~ lexical.Identifier("from")
-    ) ~ stringLiteral <~ ";" ^^^ ImportDecl
+    ) ~ stringLiteral <~ opt(";") ^^^ ImportDecl
 
   lazy val importIdentifierSeq =
-    rep1sep(identifier ~ opt(lexical.Identifier("as") ~ identifier), ",")
+    rep1sep(identifier ~ opt(lexical.Identifier("as") ~ identifier), ",") <~ opt(",")
 
   lazy val abstractModifier =
     opt(lexical.Identifier("abstract")) ^^ (_.isDefined)
@@ -190,6 +191,7 @@ class TSDefParser extends StdTokenParsers with ImplicitConversions {
 
   lazy val resultType: Parser[TypeTree] = (
       ("void" ^^^ TypeRef(CoreType("void")))
+    | typeGuard
     | typeDesc
   )
 
@@ -234,6 +236,9 @@ class TSDefParser extends StdTokenParsers with ImplicitConversions {
     | indexTypeQuery
     | "(" ~> typeDesc <~ ")"
   )
+
+  lazy val typeGuard: Parser[TypeTree] =
+    identifier ~ lexical.Identifier("is") ~> singleTypeDesc ^^^ TypeGuard
 
   lazy val typeRef: Parser[TypeRef] =
     baseTypeRef ~ opt(typeArgs) ^^ {
