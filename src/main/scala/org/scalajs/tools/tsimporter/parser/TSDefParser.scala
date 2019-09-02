@@ -56,9 +56,8 @@ class TSDefParser extends StdTokenParsers with ImplicitConversions {
       opt("declare") ~> opt("export") ~> moduleElementDecl1
     | opt("export") ~> opt("declare") ~> moduleElementDecl1
   ).map(Some(_))
-    | opt("export") ~> opt("default") ~> identifier <~ ";" ^^^ None
     | "export" ~> lexical.Identifier("as") ~> "namespace" ~> identifier <~ opt(";") ^^^ None
-//    | "export" ~> "{" ~> identifier ~> "}" <~ opt(";") ^^^ None
+    | "export" ~> "default" ~> identifier <~ opt(";") ^^^ None
   )
 
   lazy val ambientModuleDecl: Parser[DeclTree] =
@@ -156,7 +155,7 @@ class TSDefParser extends StdTokenParsers with ImplicitConversions {
   )
 
   lazy val functionSignature =
-    tparams ~ ("(" ~> repsep(functionParam, ",") <~ ")") ~ optResultType ^^ FunSignature
+    tparams ~ ("(" ~> repsep(functionParam, ",") <~ opt(",") <~ ")") ~ optResultType ^^ FunSignature
 
   lazy val functionParam =
     repeatedParamMarker ~ identifier ~ optionalMarker ~ optParamType ^^ {
